@@ -1,4 +1,5 @@
-﻿using Bit.App.Abstractions;
+﻿using System.Collections.Generic;
+using Bit.App.Abstractions;
 using Bit.App.Resources;
 using Bit.Core;
 using Bit.Core.Abstractions;
@@ -65,6 +66,8 @@ namespace Bit.App.Pages
 
         public bool YubikeyMethod => SelectedProviderType == TwoFactorProviderType.YubiKey;
 
+        public bool U2fMethod => SelectedProviderType == TwoFactorProviderType.U2f;
+
         public bool AuthenticatorMethod => SelectedProviderType == TwoFactorProviderType.Authenticator;
 
         public bool EmailMethod => SelectedProviderType == TwoFactorProviderType.Email;
@@ -84,6 +87,7 @@ namespace Bit.App.Pages
                 nameof(EmailMethod),
                 nameof(DuoMethod),
                 nameof(YubikeyMethod),
+                nameof(U2fMethod),
                 nameof(AuthenticatorMethod),
                 nameof(TotpMethod),
                 nameof(ShowTryAgain),
@@ -115,7 +119,7 @@ namespace Bit.App.Pages
             }
 
             // TODO: init U2F
-            _u2fSupported = false;
+            _u2fSupported = true;
 
             SelectedProviderType = _authService.GetDefaultTwoFactorProvider(_u2fSupported);
             Load();
@@ -134,7 +138,11 @@ namespace Bit.App.Pages
             switch (SelectedProviderType.Value)
             {
                 case TwoFactorProviderType.U2f:
-                    // TODO
+                    if (providerData.ContainsKey("Challenge"))
+                    {
+                        var challenge = CoreHelpers.DeserializeJson<Dictionary<string, object>>((string)providerData["Challenge"]); 
+                        _messagingService.Send("listenU2F", challenge);
+                    }
                     break;
                 case TwoFactorProviderType.YubiKey:
                     _messagingService.Send("listenYubiKeyOTP", true);

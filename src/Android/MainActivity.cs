@@ -9,6 +9,8 @@ using Bit.Core.Utilities;
 using Bit.Core.Abstractions;
 using System.IO;
 using System;
+using System.Collections.Generic;
+using System.Text;
 using Android.Content;
 using Bit.Droid.Utilities;
 using Bit.Droid.Receivers;
@@ -19,6 +21,14 @@ using Bit.App.Utilities;
 using System.Threading.Tasks;
 using AndroidX.Core.Content;
 using ZXing.Net.Mobile.Android;
+using Android.Support.V4.Content;
+using Android.Gms.Fido;
+using Android.Gms.Fido.Common;
+using Android.Gms.Fido.U2F.Api.Common;
+using Android.Util;
+using Newtonsoft.Json.Linq;
+using Task = System.Threading.Tasks.Task;
+using Uri = Android.Net.Uri;
 
 namespace Bit.Droid
 {
@@ -57,6 +67,7 @@ namespace Bit.Droid
         private string _activityKey = $"{nameof(MainActivity)}_{Java.Lang.JavaSystem.CurrentTimeMillis().ToString()}";
         private Java.Util.Regex.Pattern _otpPattern =
             Java.Util.Regex.Pattern.Compile("^.*?([cbdefghijklnrtuv]{32,64})$");
+        private const int REQUEST_CODE_SIGN = 1;
 
         protected override void OnCreate(Bundle savedInstanceState)
         {
@@ -115,6 +126,10 @@ namespace Bit.Droid
                 else if (message.Command == "listenYubiKeyOTP")
                 {
                     ListenYubiKey((bool)message.Data);
+                }
+                else if (message.Command == "listenU2F")
+                {
+                    ListenU2F((Dictionary<string, object>) message.Data);
                 }
                 else if (message.Command == "updatedTheme")
                 {
@@ -251,6 +266,11 @@ namespace Bit.Droid
                     return;
                 }
             }
+            else if (resultCode == Result.Ok && requestCode == REQUEST_CODE_SIGN)
+            {
+                var signResponseData = data.GetParcelableExtra(Fido.KeyResponseExtra);
+                Log.Info("bitwarden-u2f", "FIDO Activity received");
+            }
         }
 
         protected override void OnDestroy()
@@ -291,6 +311,40 @@ namespace Bit.Droid
                 }
                 catch { }
             }
+        }
+
+        private async Task<bool> ListenU2F(Dictionary<string, object> data)
+        {
+            var appId = Uri.Parse((string)data["appId"]);
+            var challenge = Encoding.ASCII.GetBytes((string) data["challenge"]);
+            var keys = ((JArray) data["keys"]).ToObject<List<Dictionary<string, string>>>();
+            var registeredKeys = new List<RegisteredKey>();
+            foreach (var key in keys)
+            {
+                var keyHandle = new KeyHandle(
+                    Encoding.ASCII.GetBytes(key["keyHandle"]),
+                    key["version"] == "U2F_V2" ?  ProtocolVersion.V2 : ProtocolVersion.V1,
+                    new List<Transport>() {Transport.Nfc, Transport.Usb, Transport.BluetoothClassic, Transport.BluetoothLowEnergy}
+                );
+                registeredKeys.Add(new RegisteredKey(keyHandle));
+            }
+            
+            var u2FClient = Fido.GetU2fApiClient(ApplicationContext);
+
+            var builder = new SignRequestParams.Builder();
+            builder.SetAppId(appId);
+            builder.SetDefaultSignChallenge(challenge);
+            builder.SetRegisteredKeys(registeredKeys);
+            var signRequest = builder.Build();
+
+           var u2FPendingIntent = await u2FClient.GetSignIntentAsync(signRequest);
+
+           if (u2FPendingIntent.HasPendingIntent)
+           {
+               u2FPendingIntent.LaunchPendingIntent(this, REQUEST_CODE_SIGN);
+           }
+
+           return true;
         }
 
         private AppOptions GetOptions()
